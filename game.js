@@ -1,11 +1,17 @@
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 
+import {
+    createPlayer,
+    updatePlayer
+} from './player.js';
+
 // ==========================================
 // 1. SCENE
 // ==========================================
 
 const scene = new THREE.Scene();
+
 scene.background = new THREE.Color(0x101525);
 scene.fog = new THREE.Fog(0x101525, 35, 120);
 
@@ -30,8 +36,15 @@ const renderer = new THREE.WebGLRenderer({
     antialias: true
 });
 
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+renderer.setPixelRatio(
+    Math.min(window.devicePixelRatio, 1.5)
+);
+
 renderer.shadowMap.enabled = true;
 
 document.getElementById('game-container')
@@ -56,13 +69,17 @@ const sunlight = new THREE.DirectionalLight(
 
 sunlight.position.set(15, 25, 10);
 sunlight.castShadow = true;
+
 scene.add(sunlight);
 
 // ==========================================
 // 5. ENVIRONMENT
 // ==========================================
 
-const groundGeometry = new THREE.PlaneGeometry(200, 200);
+const groundGeometry = new THREE.PlaneGeometry(
+    200,
+    200
+);
 
 const groundMaterial = new THREE.MeshStandardMaterial({
     color: 0x252b38,
@@ -76,9 +93,11 @@ const ground = new THREE.Mesh(
 
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
+
 scene.add(ground);
 
-// Grid for development
+// DEVELOPMENT GRID
+
 const grid = new THREE.GridHelper(
     200,
     100,
@@ -87,45 +106,17 @@ const grid = new THREE.GridHelper(
 );
 
 grid.position.y = 0.02;
+
 scene.add(grid);
 
 // ==========================================
 // 6. PLAYER
 // ==========================================
 
-const player = new THREE.Group();
-
-const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.45, 1, 4, 8),
-    new THREE.MeshStandardMaterial({
-        color: 0x5544bb,
-        roughness: 0.55
-    })
-);
-
-body.position.y = 1;
-body.castShadow = true;
-
-player.add(body);
-
-// Head
-const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.32, 16, 16),
-    new THREE.MeshStandardMaterial({
-        color: 0xf0d0bc
-    })
-);
-
-head.position.y = 2;
-head.castShadow = true;
-
-player.add(head);
-
-player.position.set(0, 0, 0);
-scene.add(player);
+const player = createPlayer(scene);
 
 // ==========================================
-// 7. MOVEMENT
+// 7. INPUT SYSTEM
 // ==========================================
 
 const keys = {};
@@ -138,39 +129,30 @@ window.addEventListener('keyup', (event) => {
     keys[event.code] = false;
 });
 
-const clock = new THREE.Clock();
-
-function updatePlayer(delta) {
-    const direction = new THREE.Vector3();
-
-    if (keys['KeyW']) direction.z -= 1;
-    if (keys['KeyS']) direction.z += 1;
-    if (keys['KeyA']) direction.x -= 1;
-    if (keys['KeyD']) direction.x += 1;
-
-    if (direction.lengthSq() > 0) {
-        direction.normalize();
-
-        player.position.x += direction.x * 8 * delta;
-        player.position.z += direction.z * 8 * delta;
-
-        player.rotation.y = Math.atan2(
-            direction.x,
-            direction.z
-        );
-    }
-}
+window.addEventListener('blur', () => {
+    Object.keys(keys).forEach(key => {
+        keys[key] = false;
+    });
+});
 
 // ==========================================
 // 8. CAMERA FOLLOW
 // ==========================================
 
-function updateCamera() {
-    const offset = new THREE.Vector3(0, 5, 9);
+const cameraOffset = new THREE.Vector3(0, 5, 9);
 
-    const targetPosition = player.position.clone().add(offset);
+function updateCamera(delta) {
 
-    camera.position.lerp(targetPosition, 0.08);
+    const targetPosition = player.position
+        .clone()
+        .add(cameraOffset);
+
+    const smoothness = 1 - Math.exp(-6 * delta);
+
+    camera.position.lerp(
+        targetPosition,
+        smoothness
+    );
 
     camera.lookAt(
         player.position.x,
@@ -183,19 +165,30 @@ function updateCamera() {
 // 9. HUD
 // ==========================================
 
-document.getElementById('loading').style.display = 'none';
+const loadingScreen = document.getElementById('loading');
+
+if (loadingScreen) {
+    loadingScreen.style.display = 'none';
+}
 
 // ==========================================
 // 10. GAME LOOP
 // ==========================================
 
+const clock = new THREE.Clock();
+
 function animate() {
+
     requestAnimationFrame(animate);
 
-    const delta = Math.min(clock.getDelta(), 0.05);
+    const delta = Math.min(
+        clock.getDelta(),
+        0.05
+    );
 
-    updatePlayer(delta);
-    updateCamera();
+    updatePlayer(player, keys, delta);
+
+    updateCamera(delta);
 
     renderer.render(scene, camera);
 }
@@ -207,7 +200,9 @@ animate();
 // ==========================================
 
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+
+    camera.aspect =
+        window.innerWidth / window.innerHeight;
 
     camera.updateProjectionMatrix();
 
@@ -216,4 +211,3 @@ window.addEventListener('resize', () => {
         window.innerHeight
     );
 });
-
