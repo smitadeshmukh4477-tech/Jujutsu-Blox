@@ -1,8 +1,12 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 
 // ==========================================
-// JUJUTSU BLOX - CHARACTER 2.0
+// JUJUTSU BLOX - CHARACTER 3.0 (anime toon style)
 // ==========================================
+// ASSUMPTIONS (change if wrong):
+// - character faces +Z, feet at y = 0, about 3 units tall
+// - scene has at least one directional light (toon shading needs a light)
+// - same exports as before so game.js keeps working
 
 const CONFIG = {
     speed: 8,
@@ -11,81 +15,127 @@ const CONFIG = {
     spawnPosition: new THREE.Vector3(0, 0, 0)
 };
 
-// ==========================================
-// MATERIALS
-// ==========================================
-
-const mat = {
-    skin: new THREE.MeshStandardMaterial({ color: 0xe8b995, roughness: 0.8 }),
-    uniform: new THREE.MeshStandardMaterial({ color: 0x171725, roughness: 0.7 }),
-    uniformLight: new THREE.MeshStandardMaterial({ color: 0x29293d, roughness: 0.7 }),
-    dark: new THREE.MeshStandardMaterial({ color: 0x090b15, roughness: 0.8 }),
-    hair: new THREE.MeshStandardMaterial({ color: 0xf05b91, roughness: 0.8 }),
-    hairLight: new THREE.MeshStandardMaterial({ color: 0xff8eb5, roughness: 0.8 }),
-    eyes: new THREE.MeshStandardMaterial({ color: 0x271321 }),
-    white: new THREE.MeshStandardMaterial({ color: 0xffffff }),
-    gold: new THREE.MeshStandardMaterial({ color: 0xd4a64d, metalness: 0.65, roughness: 0.35 }),
-    sole: new THREE.MeshStandardMaterial({ color: 0x30303b })
+// look settings, tweak these
+const LOOK = {
+    outlineColor: 0x120d1c,
+    outlineThickness: 0.02,   // world units
+    skin: 0xf2c4a2,
+    hair: 0xf2799f,
+    hairLight: 0xffaac6,
+    hairDark: 0xc4527a,
+    iris: 0xb86a2e,
+    uniform: 0x1b2038,
+    uniformLight: 0x2f3658,
+    gold: 0xe3b24f
 };
 
 // ==========================================
-// HELPER FUNCTIONS
+// TOON MATERIALS + OUTLINE
 // ==========================================
 
-function mesh(geometry, material, position, parent) {
-    const object = new THREE.Mesh(geometry, material);
+// 3 step shading ramp (shadow / mid / lit)
+const gradient = (() => {
+    const tex = new THREE.DataTexture(new Uint8Array([125, 195, 255]), 3, 1, THREE.RedFormat);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+})();
 
-    object.position.set(position.x, position.y, position.z);
-
-    object.castShadow = true;
-    object.receiveShadow = true;
-
-    parent.add(object);
-    return object;
+function toon(color, extra = {}) {
+    return new THREE.MeshToonMaterial({ color, gradientMap: gradient, ...extra });
 }
 
-function box(parent, material, position, size, bevel = 0) {
-    const geometry = new THREE.BoxGeometry(
-        size.x,
-        size.y,
-        size.z
+const mat = {
+    skin: toon(LOOK.skin),
+    uniform: toon(LOOK.uniform),
+    uniformLight: toon(LOOK.uniformLight),
+    uniformDS: toon(LOOK.uniform, { side: THREE.DoubleSide }),
+    dark: toon(0x0b0d18),
+    hair: toon(LOOK.hair, { side: THREE.DoubleSide }),
+    hairLight: toon(LOOK.hairLight),
+    hairDark: toon(LOOK.hairDark),
+    gold: toon(LOOK.gold),
+    red: toon(0xc8283c),
+    sole: toon(0x3a3a4a),
+    white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    iris: new THREE.MeshBasicMaterial({ color: LOOK.iris }),
+    pupil: new THREE.MeshBasicMaterial({ color: 0x1c0f14 }),
+    line: new THREE.MeshBasicMaterial({ color: 0x1c0f14 })
+};
+
+// inverted hull outline: back faces pushed out along smooth normals
+const outlineMat = new THREE.MeshBasicMaterial({ color: LOOK.outlineColor, side: THREE.BackSide });
+outlineMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `vec3 transformed = position + normalize(normal) * ${LOOK.outlineThickness.toFixed(4)};`
     );
+};
 
-    const object = mesh(geometry, material, position, parent);
+// average normals of vertices sharing a position so hard edges (boxes) get a clean outline
+function smoothedClone(geometry) {
+    const g = geometry.clone();
+    const p = g.attributes.position;
+    const n = g.attributes.normal;
+    const key = (i) =>
+        `${Math.round(p.getX(i) * 1000)},${Math.round(p.getY(i) * 1000)},${Math.round(p.getZ(i) * 1000)}`;
+    const sums = new Map();
 
-    return object;
+    for (let i = 0; i < p.count; i++) {
+        const k = key(i);
+        let v = sums.get(k);
+        if (!v) { v = new THREE.Vector3(); sums.set(k, v); }
+        v.x += n.getX(i); v.y += n.getY(i); v.z += n.getZ(i);
+    }
+    const out = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+        out.copy(sums.get(key(i))).normalize();
+        n.setXYZ(i, out.x, out.y, out.z);
+    }
+    return g;
 }
 
-function sphere(parent, material, position, scale) {
-    const object = mesh(
-        new THREE.SphereGeometry(1, 20, 16),
-        material,
-        position,
-        parent
-    );
+// ==========================================
+// HELPERS
+// ==========================================
 
-    object.scale.set(scale.x, scale.y, scale.z);
-    return object;
+const UP = new THREE.Vector3(0, 1, 0);
+
+// ellipsoid with the scale baked in (keeps outline thickness even)
+const ball = (sx, sy, sz = sx) => new THREE.SphereGeometry(1, 24, 18).scale(sx, sy, sz);
+const slab = (x, y, z) => new THREE.BoxGeometry(x, y, z);
+const cone = (size) => new THREE.ConeGeometry(size * 0.4, size, 8).translate(0, size / 2, 0);
+
+function part(parent, geometry, material, pos = [0, 0, 0], opts = {}) {
+    const m = new THREE.Mesh(geometry, material);
+    m.position.set(pos[0], pos[1], pos[2]);
+    if (opts.rot) m.rotation.set(opts.rot[0], opts.rot[1], opts.rot[2]);
+    m.castShadow = true;
+    m.receiveShadow = false; // avoids shadow acne on toon materials
+
+    if (opts.outline !== false) {
+        m.add(new THREE.Mesh(smoothedClone(geometry), outlineMat));
+    }
+
+    parent.add(m);
+    return m;
 }
 
-function spike(parent, position, direction, size, material = mat.hair) {
-    const object = mesh(
-        new THREE.ConeGeometry(size * 0.42, size, 8),
-        material,
-        position,
-        parent
-    );
+function spike(parent, p, d, size, material = mat.hair) {
+    const m = part(parent, cone(size), material, p);
+    m.quaternion.setFromUnitVectors(UP, new THREE.Vector3(d[0], d[1], d[2]).normalize());
+    return m;
+}
 
-    object.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(
-            direction.x,
-            direction.y,
-            direction.z
-        ).normalize()
-    );
-
-    return object;
+// z of the torso surface at height y (for placing buttons etc)
+function torsoZ(y) {
+    const chest = Math.abs(y - 1.52) < 0.33
+        ? 0.26 * Math.sqrt(1 - Math.pow((y - 1.52) / 0.33, 2)) : 0;
+    const dy = Math.abs(y - 1.1) - 0.1;
+    const abd = dy <= 0 ? 0.221 : 0.221 * Math.sqrt(Math.max(0, 1 - Math.pow(dy / 0.26, 2)));
+    return Math.max(chest, abd * 0.95);
 }
 
 // ==========================================
@@ -99,370 +149,162 @@ export function createPlayer(scene) {
 
     const character = new THREE.Group();
     character.name = 'CharacterModel';
-
     player.add(character);
 
-    // ======================================
-    // TORSO
-    // ======================================
+    // ---------- TORSO ----------
+    part(character, new THREE.CapsuleGeometry(0.26, 0.2, 6, 14).scale(1.1, 1, 0.85), mat.uniform, [0, 1.1, 0]);
+    part(character, ball(0.37, 0.33, 0.26), mat.uniform, [0, 1.52, 0]);
 
-    mesh(
-        new THREE.CapsuleGeometry(0.37, 0.65, 5, 12),
-        mat.uniform,
-        { x: 0, y: 1.35, z: 0 },
-        character
-    );
+    // jacket placket + gold buttons
+    [1.64, 1.48, 1.32, 1.16].forEach((y) => {
+        part(character, slab(0.04, 0.14, 0.012), mat.dark, [0, y, torsoZ(y) + 0.002], { outline: false });
+        part(character, ball(0.03, 0.03, 0.016), mat.gold, [0, y, torsoZ(y) + 0.012], { outline: false });
+    });
 
-    // Chest jacket
-
-    box(
-        character,
-        mat.uniformLight,
-        { x: 0, y: 1.55, z: 0.355 },
-        { x: 0.58, y: 0.4, z: 0.055 }
-    );
-
-    // Jacket lapels
-
+    // shoulder pads + gold trim
     for (const side of [-1, 1]) {
-        const lapel = box(
-            character,
-            mat.dark,
-            { x: side * 0.105, y: 1.68, z: 0.39 },
-            { x: 0.12, y: 0.35, z: 0.07 }
-        );
-
-        lapel.rotation.z = side * -0.25;
-
-        // Shoulder armor details
-
-        const shoulder = sphere(
-            character,
-            mat.uniformLight,
-            { x: side * 0.37, y: 1.73, z: 0 },
-            { x: 0.23, y: 0.19, z: 0.25 }
-        );
-
-        // Gold shoulder insignia
-
-        sphere(
-            character,
-            mat.gold,
-            { x: side * 0.39, y: 1.77, z: 0.205 },
-            { x: 0.065, y: 0.065, z: 0.025 }
-        );
+        part(character, ball(0.19, 0.16, 0.19), mat.uniformLight, [side * 0.37, 1.73, 0]);
+        part(character, ball(0.05, 0.05, 0.02), mat.gold, [side * 0.4, 1.76, 0.17], { outline: false });
     }
 
-    // High collar
+    // high collar with red lining ring
+    part(character, new THREE.CylinderGeometry(0.17, 0.2, 0.2, 18, 1, true), mat.uniformDS, [0, 1.85, 0]);
+    part(character, new THREE.TorusGeometry(0.18, 0.022, 8, 28), mat.red, [0, 1.95, 0], { rot: [Math.PI / 2, 0, 0], outline: false });
 
-    const collar = mesh(
-        new THREE.CylinderGeometry(0.19, 0.21, 0.23, 12, 1, true),
-        mat.dark,
-        { x: 0, y: 1.88, z: 0 },
-        character
-    );
+    // neck
+    part(character, new THREE.CylinderGeometry(0.085, 0.09, 0.2, 12), mat.skin, [0, 1.95, 0], { outline: false });
 
-    // Buttons
+    // hood bunched behind the neck
+    part(character, ball(0.27, 0.2, 0.16), mat.uniform, [0, 1.8, -0.2]);
 
-    for (let i = 0; i < 3; i++) {
-        sphere(
-            character,
-            mat.gold,
-            { x: 0, y: 1.56 - i * 0.16, z: 0.415 },
-            { x: 0.035, y: 0.035, z: 0.018 }
-        );
-    }
+    // belt + buckle
+    part(character, new THREE.CylinderGeometry(0.29, 0.29, 0.11, 22).scale(1, 1, 0.8), mat.dark, [0, 0.93, 0]);
+    part(character, slab(0.12, 0.1, 0.03), mat.gold, [0, 0.93, 0.235], { outline: false });
 
-    // Belt
-
-    box(
-        character,
-        mat.dark,
-        { x: 0, y: 0.91, z: 0 },
-        { x: 0.73, y: 0.14, z: 0.43 }
-    );
-
-    box(
-        character,
-        mat.gold,
-        { x: 0, y: 0.91, z: 0.222 },
-        { x: 0.14, y: 0.12, z: 0.025 }
-    );
-
-    // Side equipment pouches
-
+    // hip pouches
     for (const side of [-1, 1]) {
-        box(
-            character,
-            mat.uniformLight,
-            { x: side * 0.33, y: 0.91, z: 0.05 },
-            { x: 0.15, y: 0.19, z: 0.2 }
-        );
+        part(character, slab(0.12, 0.17, 0.18), mat.uniformLight, [side * 0.3, 0.9, 0.04]);
     }
 
-    // ======================================
-    // HEAD
-    // ======================================
-
+    // ---------- HEAD ----------
     const head = new THREE.Group();
     head.name = 'Head';
-    head.position.y = 2.22;
-
+    head.position.y = 2.3;
     character.add(head);
 
-    sphere(
-        head,
-        mat.skin,
-        { x: 0, y: 0, z: 0 },
-        { x: 0.32, y: 0.39, z: 0.3 }
-    );
+    part(head, ball(0.32, 0.39, 0.3), mat.skin);
 
-    // Ears
-
+    // ears
     for (const side of [-1, 1]) {
-        sphere(
-            head,
-            mat.skin,
-            { x: side * 0.31, y: -0.025, z: 0 },
-            { x: 0.075, y: 0.11, z: 0.09 }
-        );
+        part(head, ball(0.05, 0.085, 0.06), mat.skin, [side * 0.315, -0.03, -0.01]);
     }
 
-    // Eyes
+    // nose + smile
+    part(head, ball(0.026, 0.035, 0.03), mat.skin, [0, -0.07, 0.288], { outline: false });
+    part(head, new THREE.TorusGeometry(0.045, 0.007, 6, 16, Math.PI), mat.line, [0, -0.145, 0.262],
+        { rot: [0, 0, Math.PI], outline: false });
 
+    // eyes (big anime eyes) + brows
+    const eyes = [];
     for (const side of [-1, 1]) {
+        const eye = new THREE.Group();
+        eye.position.set(side * 0.125, 0.02, 0.262);
+        eye.rotation.y = side * 0.38;
+        head.add(eye);
 
-        sphere(
-            head,
-            mat.white,
-            { x: side * 0.125, y: 0.045, z: 0.267 },
-            { x: 0.073, y: 0.063, z: 0.035 }
-        );
+        part(eye, ball(0.07, 0.078, 0.03), mat.white, [0, 0, 0], { outline: false });
+        part(eye, ball(0.05, 0.062, 0.02), mat.iris, [0, -0.004, 0.02], { outline: false });
+        part(eye, ball(0.026, 0.04, 0.012), mat.pupil, [0, -0.004, 0.03], { outline: false });
+        part(eye, ball(0.014, 0.016, 0.008), mat.white, [-0.014, 0.026, 0.04], { outline: false });
+        part(eye, ball(0.007, 0.008, 0.006), mat.white, [0.016, -0.03, 0.04], { outline: false });
+        // upper lash line
+        part(eye, slab(0.16, 0.022, 0.03), mat.line, [0, 0.074, 0.012],
+            { rot: [0, 0, side * 0.12], outline: false });
+        eyes.push(eye);
 
-        sphere(
-            head,
-            mat.eyes,
-            { x: side * 0.125, y: 0.045, z: 0.298 },
-            { x: 0.031, y: 0.043, z: 0.015 }
-        );
-
-        sphere(
-            head,
-            mat.white,
-            { x: side * 0.115, y: 0.065, z: 0.312 },
-            { x: 0.012, y: 0.015, z: 0.008 }
-        );
-
-        // Eyebrows
-
-        const brow = box(
-            head,
-            mat.hair,
-            { x: side * 0.125, y: 0.135, z: 0.27 },
-            { x: 0.13, y: 0.025, z: 0.035 }
-        );
-
-        brow.rotation.z = side * -0.13;
+        part(head, slab(0.12, 0.022, 0.03), mat.hairDark, [side * 0.125, 0.15, 0.245],
+            { rot: [0, side * 0.38, side * 0.2], outline: false });
     }
 
-    // Nose
+    // ---------- HAIR ----------
+    const hair = new THREE.Group();
+    head.add(hair);
 
-    sphere(
-        head,
-        mat.skin,
-        { x: 0, y: -0.045, z: 0.3 },
-        { x: 0.035, y: 0.055, z: 0.035 }
-    );
+    // cap tilted back so the forehead stays open
+    const capGeo = new THREE.SphereGeometry(1, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.47).scale(0.35, 0.41, 0.345);
+    part(hair, capGeo, mat.hair, [0, 0.03, -0.01], { rot: [-0.45, 0, 0] });
 
-    // Mouth
-
-    box(
-        head,
-        mat.eyes,
-        { x: 0, y: -0.18, z: 0.292 },
-        { x: 0.09, y: 0.012, z: 0.012 }
-    );
-
-    // ======================================
-    // HAIR
-    // ======================================
-
-    // Main hair volume
-
-    sphere(
-        head,
-        mat.hair,
-        { x: 0, y: 0.23, z: -0.025 },
-        { x: 0.34, y: 0.27, z: 0.32 }
-    );
-
-    // Top spikes
-
-    const hairSpikes = [
-        [-0.23, 0.27, 0, -0.7, 0.8, 0.1, 0.37],
-        [-0.12, 0.39, -0.03, -0.3, 1, 0, 0.42],
-        [0, 0.43, -0.02, 0, 1, 0, 0.48],
-        [0.13, 0.36, -0.03, 0.4, 1, 0, 0.43],
-        [0.25, 0.25, 0, 0.8, 0.7, 0.1, 0.37],
-        [-0.28, 0.12, 0.04, -1, 0.3, 0.2, 0.31],
-        [0.28, 0.12, 0.04, 1, 0.3, 0.2, 0.31],
-        [-0.12, 0.25, 0.19, -0.5, 0.5, 0.8, 0.29],
-        [0.12, 0.25, 0.19, 0.5, 0.5, 0.8, 0.29]
+    // [x, y, z, dirX, dirY, dirZ, size, tone]
+    const spikes = [
+        // crown
+        [0, 0.34, 0, 0, 1, 0.3, 0.38, 'hair'],
+        [-0.15, 0.33, -0.05, -0.5, 1, 0.1, 0.36, 'hair'],
+        [0.15, 0.33, -0.05, 0.5, 1, 0.1, 0.36, 'hair'],
+        [-0.26, 0.25, -0.05, -1, 0.8, 0, 0.32, 'hair'],
+        [0.26, 0.25, -0.05, 1, 0.8, 0, 0.32, 'hair'],
+        [-0.08, 0.38, -0.1, -0.2, 1, -0.2, 0.34, 'hairLight'],
+        [0.1, 0.38, -0.1, 0.25, 1, -0.15, 0.32, 'hairLight'],
+        // back
+        [0, 0.34, -0.2, 0, 0.8, -1, 0.4, 'hair'],
+        [-0.16, 0.3, -0.2, -0.5, 0.7, -1, 0.34, 'hair'],
+        [0.16, 0.3, -0.2, 0.5, 0.7, -1, 0.34, 'hair'],
+        // nape (darker undercut)
+        [-0.16, 0.1, -0.3, -0.3, -0.4, -1, 0.28, 'hairDark'],
+        [0, 0.08, -0.3, 0, -0.4, -1, 0.3, 'hairDark'],
+        [0.16, 0.1, -0.3, 0.3, -0.4, -1, 0.28, 'hairDark'],
+        // fringe over the forehead
+        [-0.14, 0.27, 0.2, -0.2, -0.75, 0.5, 0.15, 'hairLight'],
+        [0, 0.28, 0.21, 0, -0.7, 0.55, 0.16, 'hairLight'],
+        [0.14, 0.27, 0.2, 0.2, -0.75, 0.5, 0.15, 'hairLight'],
+        [-0.25, 0.2, 0.14, -0.7, -0.7, 0.4, 0.14, 'hair'],
+        [0.25, 0.2, 0.14, 0.7, -0.7, 0.4, 0.14, 'hair'],
+        // sideburns
+        [-0.3, 0.08, 0.06, -0.2, -1, 0.1, 0.16, 'hair'],
+        [0.3, 0.08, 0.06, 0.2, -1, 0.1, 0.16, 'hair']
     ];
 
-    for (const s of hairSpikes) {
-        spike(
-            head,
-            { x: s[0], y: s[1], z: s[2] },
-            { x: s[3], y: s[4], z: s[5] },
-            s[6]
-        );
+    for (const s of spikes) {
+        spike(hair, [s[0], s[1], s[2]], [s[3], s[4], s[5]], s[6], mat[s[7]]);
     }
 
-    // Back hair
-
-    for (let i = -1; i <= 1; i++) {
-        spike(
-            head,
-            { x: i * 0.16, y: 0.06, z: -0.23 },
-            { x: i * 0.4, y: 0.1, z: -1 },
-            0.34,
-            mat.hairLight
-        );
-    }
-
-    // ======================================
-    // ARMS
-    // ======================================
-
+    // ---------- ARMS ----------
     const arms = [];
 
     for (const side of [-1, 1]) {
-
         const arm = new THREE.Group();
-
-        arm.position.set(side * 0.43, 1.68, 0);
-
+        arm.position.set(side * 0.4, 1.7, 0);
         arm.name = side === -1 ? 'LeftArm' : 'RightArm';
-
         character.add(arm);
 
-        // Upper arm
-
-        mesh(
-            new THREE.CapsuleGeometry(0.145, 0.35, 5, 10),
-            mat.uniform,
-            { x: 0, y: -0.3, z: 0 },
-            arm
-        );
-
-        // Elbow detail
-
-        sphere(
-            arm,
-            mat.uniformLight,
-            { x: 0, y: -0.53, z: 0 },
-            { x: 0.14, y: 0.13, z: 0.14 }
-        );
-
-        // Forearm
-
-        mesh(
-            new THREE.CapsuleGeometry(0.12, 0.27, 4, 10),
-            mat.uniformDark,
-            { x: 0, y: -0.68, z: 0 },
-            arm
-        );
-
-        // Wrist cuff
-
-        mesh(
-            new THREE.CylinderGeometry(0.125, 0.125, 0.09, 12),
-            mat.uniformLight,
-            { x: 0, y: -0.83, z: 0 },
-            arm
-        );
-
-        // Hand
-
-        sphere(
-            arm,
-            mat.skin,
-            { x: 0, y: -0.96, z: 0.015 },
-            { x: 0.105, y: 0.13, z: 0.11 }
-        );
+        part(arm, new THREE.CapsuleGeometry(0.11, 0.3, 5, 10), mat.uniform, [0, -0.27, 0]);       // upper arm
+        part(arm, ball(0.115, 0.1, 0.115), mat.uniformLight, [0, -0.5, 0]);                        // elbow
+        part(arm, new THREE.CapsuleGeometry(0.095, 0.24, 4, 10), mat.uniform, [0, -0.66, 0]);     // forearm
+        part(arm, new THREE.CylinderGeometry(0.105, 0.105, 0.07, 12), mat.uniformLight, [0, -0.84, 0]); // cuff
+        part(arm, ball(0.085, 0.105, 0.09), mat.skin, [0, -0.95, 0.01]);                           // hand
 
         arms.push(arm);
     }
 
-    // ======================================
-    // LEGS
-    // ======================================
-
+    // ---------- LEGS ----------
     const legs = [];
 
     for (const side of [-1, 1]) {
-
         const leg = new THREE.Group();
-
-        leg.position.set(side * 0.2, 0.91, 0);
-
+        leg.position.set(side * 0.17, 0.91, 0);
         leg.name = side === -1 ? 'LeftLeg' : 'RightLeg';
-
         character.add(leg);
 
-        // Pants
-
-        mesh(
-            new THREE.CapsuleGeometry(0.17, 0.46, 5, 10),
-            mat.uniform,
-            { x: 0, y: -0.35, z: 0 },
-            leg
-        );
-
-        // Knee panel
-
-        box(
-            leg,
-            mat.uniformLight,
-            { x: 0, y: -0.37, z: 0.15 },
-            { x: 0.22, y: 0.15, z: 0.035 }
-        );
-
-        // Lower leg
-
-        mesh(
-            new THREE.CylinderGeometry(0.12, 0.14, 0.3, 10),
-            mat.uniformDark,
-            { x: 0, y: -0.64, z: 0 },
-            leg
-        );
-
-        // Boot
-
-        box(
-            leg,
-            mat.dark,
-            { x: 0, y: -0.84, z: 0.09 },
-            { x: 0.3, y: 0.2, z: 0.43 }
-        );
-
-        // Boot sole
-
-        box(
-            leg,
-            mat.sole,
-            { x: 0, y: -0.945, z: 0.1 },
-            { x: 0.31, y: 0.045, z: 0.44 }
-        );
+        part(leg, new THREE.CapsuleGeometry(0.15, 0.4, 5, 10), mat.uniform, [0, -0.3, 0]);            // thigh
+        part(leg, slab(0.2, 0.13, 0.03), mat.uniformLight, [0, -0.34, 0.14]);                          // knee pad
+        part(leg, new THREE.CylinderGeometry(0.1, 0.12, 0.36, 12), mat.uniform, [0, -0.62, 0]);       // shin
+        part(leg, slab(0.26, 0.18, 0.38), mat.dark, [0, -0.8, 0.07]);                                  // boot
+        part(leg, slab(0.27, 0.04, 0.4), mat.sole, [0, -0.89, 0.08]);                                  // sole
+        part(leg, slab(0.27, 0.025, 0.04), mat.gold, [0, -0.73, 0.2], { outline: false });             // boot trim
 
         legs.push(leg);
     }
 
-    // ======================================
-    // PLAYER DATA
-    // ======================================
-
+    // ---------- PLAYER DATA ----------
     player.position.copy(CONFIG.spawnPosition);
 
     player.userData = {
@@ -483,6 +325,8 @@ export function createPlayer(scene) {
 
         character,
         head,
+        hair,
+        eyes,
         arms,
         legs,
 
@@ -510,90 +354,72 @@ export function updatePlayer(player, keys, delta) {
     if (keys['KeyD']) direction.x += 1;
 
     const isMoving = direction.lengthSq() > 0;
-
-    const isSprinting =
-        isMoving &&
-        (keys['ShiftLeft'] || keys['ShiftRight']);
+    const isSprinting = isMoving && (keys['ShiftLeft'] || keys['ShiftRight']);
 
     data.isMoving = isMoving;
     data.isSprinting = isSprinting;
 
     if (isMoving) {
-
         direction.normalize();
 
-        const speed = isSprinting
-            ? CONFIG.sprintSpeed
-            : CONFIG.speed;
+        const speed = isSprinting ? CONFIG.sprintSpeed : CONFIG.speed;
 
         player.position.x += direction.x * speed * delta;
         player.position.z += direction.z * speed * delta;
 
-        const targetRotation = Math.atan2(
-            direction.x,
-            direction.z
-        );
+        const targetRotation = Math.atan2(direction.x, direction.z);
 
         let difference = targetRotation - player.rotation.y;
+        difference = Math.atan2(Math.sin(difference), Math.cos(difference));
 
-        difference = Math.atan2(
-            Math.sin(difference),
-            Math.cos(difference)
-        );
-
-        player.rotation.y += difference *
-            Math.min(1, CONFIG.rotationSpeed * delta);
+        player.rotation.y += difference * Math.min(1, CONFIG.rotationSpeed * delta);
     }
 
-    // ======================================
-    // ANIMATIONS
-    // ======================================
-
+    // ---------- ANIMATION ----------
     data.animationTime += delta;
 
     const t = data.animationTime;
-
-    const movementAmount = isMoving ? 1 : 0;
-
-    const sprintMultiplier = isSprinting ? 1.5 : 1;
-
+    const move = isMoving ? 1 : 0;
     const swing = Math.sin(t * (isSprinting ? 13 : 9));
+    const ease = Math.min(1, delta * 10);
 
-    // Walking legs
+    // legs
+    data.legs[0].rotation.x = THREE.MathUtils.lerp(data.legs[0].rotation.x, swing * 0.6 * move, ease);
+    data.legs[1].rotation.x = THREE.MathUtils.lerp(data.legs[1].rotation.x, -swing * 0.6 * move, ease);
 
-    data.legs[0].rotation.x =
-        swing * 0.55 * movementAmount;
+    // arms (+ small idle sway and slight outward angle)
+    const idleArm = Math.sin(t * 1.8) * 0.04 * (1 - move);
+    data.arms[0].rotation.x = THREE.MathUtils.lerp(data.arms[0].rotation.x, -swing * 0.45 * move + idleArm, ease);
+    data.arms[1].rotation.x = THREE.MathUtils.lerp(data.arms[1].rotation.x, swing * 0.45 * move - idleArm, ease);
+    data.arms[0].rotation.z = -0.07;
+    data.arms[1].rotation.z = 0.07;
 
-    data.legs[1].rotation.x =
-        -swing * 0.55 * movementAmount;
-
-    // Arm swinging
-
-    data.arms[0].rotation.x =
-        -swing * 0.4 * movementAmount;
-
-    data.arms[1].rotation.x =
-        swing * 0.4 * movementAmount;
-
-    // Idle breathing / movement bounce
-
+    // bounce (never dips below the ground)
     data.character.position.y =
-        Math.sin(t * 2.5) * 0.018 +
-        Math.abs(swing) * 0.045 * movementAmount;
+        (Math.sin(t * 2.5) * 0.5 + 0.5) * 0.025 * (1 - move) +
+        Math.abs(swing) * 0.05 * move;
 
-    // Head movement
+    // lean forward when running (positive x tips the top toward +Z)
+    data.character.rotation.x = THREE.MathUtils.lerp(
+        data.character.rotation.x,
+        isSprinting ? 0.14 : (isMoving ? 0.05 : 0),
+        Math.min(1, delta * 6)
+    );
 
-    data.head.rotation.z =
-        Math.sin(t * 1.5) * 0.025;
+    // head
+    data.head.rotation.z = Math.sin(t * 1.5) * 0.025;
+    data.head.rotation.x = THREE.MathUtils.lerp(data.head.rotation.x, isMoving ? -0.03 : 0, ease);
 
-    // Slight sprint lean
+    // hair streams back a little when moving
+    data.hair.rotation.x = THREE.MathUtils.lerp(
+        data.hair.rotation.x,
+        isSprinting ? -0.1 : (isMoving ? -0.04 : Math.sin(t * 2) * 0.012),
+        Math.min(1, delta * 6)
+    );
 
-    data.character.rotation.x =
-        THREE.MathUtils.lerp(
-            data.character.rotation.x,
-            isSprinting ? -0.09 : 0,
-            Math.min(1, delta * 5)
-        );
+    // blink every few seconds
+    const blink = (t % 3.8) < 0.12 ? 0.1 : 1;
+    for (const eye of data.eyes) eye.scale.y = blink;
 }
 
 // ==========================================
@@ -602,20 +428,13 @@ export function updatePlayer(player, keys, delta) {
 
 export function damagePlayer(player, damage) {
     const data = player.userData;
-
     data.health = Math.max(0, data.health - damage);
-
     return data.health;
 }
 
 export function healPlayer(player, amount) {
     const data = player.userData;
-
-    data.health = Math.min(
-        data.maxHealth,
-        data.health + amount
-    );
-
+    data.health = Math.min(data.maxHealth, data.health + amount);
     return data.health;
 }
 
@@ -625,21 +444,13 @@ export function healPlayer(player, amount) {
 
 export function consumeCursedEnergy(player, amount) {
     const data = player.userData;
-
     if (data.cursedEnergy < amount) return false;
-
     data.cursedEnergy -= amount;
-
     return true;
 }
 
 export function regenerateCursedEnergy(player, amount) {
     const data = player.userData;
-
-    data.cursedEnergy = Math.min(
-        data.maxCursedEnergy,
-        data.cursedEnergy + amount
-    );
-
+    data.cursedEnergy = Math.min(data.maxCursedEnergy, data.cursedEnergy + amount);
     return data.cursedEnergy;
 }
