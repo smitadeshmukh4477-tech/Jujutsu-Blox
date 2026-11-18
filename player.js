@@ -3,9 +3,8 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.m
 
 // ==========================================
 // JUJUTSU BLOX - PLAYER SYSTEM
+// ANIME CHARACTER EDITION
 // ==========================================
-
-// PLAYER CONFIGURATION
 
 const PLAYER_CONFIG = {
     speed: 8,
@@ -13,6 +12,95 @@ const PLAYER_CONFIG = {
     rotationSpeed: 12,
     spawnPosition: new THREE.Vector3(0, 0, 0)
 };
+
+// ==========================================
+// MATERIALS
+// ==========================================
+
+const materials = {
+    skin: new THREE.MeshStandardMaterial({
+        color: 0xf0c6a5,
+        roughness: 0.85
+    }),
+
+    uniform: new THREE.MeshStandardMaterial({
+        color: 0x171725,
+        roughness: 0.75
+    }),
+
+    uniformDark: new THREE.MeshStandardMaterial({
+        color: 0x090914,
+        roughness: 0.8
+    }),
+
+    hair: new THREE.MeshStandardMaterial({
+        color: 0xff6699,
+        roughness: 0.9
+    }),
+
+    eyes: new THREE.MeshStandardMaterial({
+        color: 0x21101b
+    }),
+
+    white: new THREE.MeshStandardMaterial({
+        color: 0xffffff
+    }),
+
+    buttons: new THREE.MeshStandardMaterial({
+        color: 0xb7a4c9,
+        metalness: 0.5,
+        roughness: 0.4
+    })
+};
+
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+function createMesh(geometry, material, position, parent) {
+    const mesh = new THREE.Mesh(geometry, material);
+
+    mesh.position.set(
+        position.x,
+        position.y,
+        position.z
+    );
+
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    parent.add(mesh);
+
+    return mesh;
+}
+
+function createSpike(parent, position, direction, size) {
+    const geometry = new THREE.ConeGeometry(
+        size * 0.42,
+        size,
+        7
+    );
+
+    const spike = createMesh(
+        geometry,
+        materials.hair,
+        position,
+        parent
+    );
+
+    const target = new THREE.Vector3(
+        direction.x,
+        direction.y,
+        direction.z
+    ).normalize();
+
+    spike.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        target
+    );
+
+    return spike;
+}
 
 // ==========================================
 // 1. CREATE PLAYER
@@ -24,63 +112,329 @@ export function createPlayer(scene) {
 
     player.name = 'Player';
 
-    // BODY
+    // CHARACTER PARTS GROUP
 
-    const bodyGeometry = new THREE.CapsuleGeometry(
-        0.45,
-        1,
-        4,
-        8
+    const character = new THREE.Group();
+
+    character.name = 'CharacterModel';
+
+    player.add(character);
+
+    // ======================================
+    // TORSO
+    // ======================================
+
+    const torso = createMesh(
+        new THREE.BoxGeometry(0.76, 0.85, 0.42),
+        materials.uniform,
+        { x: 0, y: 1.18, z: 0 },
+        character
     );
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0x252538,
-        roughness: 0.6
-    });
+    torso.name = 'Torso';
 
-    const body = new THREE.Mesh(
-        bodyGeometry,
-        bodyMaterial
+    // Rounded-looking shoulders
+
+    for (const side of [-1, 1]) {
+        createMesh(
+            new THREE.SphereGeometry(0.23, 12, 12),
+            materials.uniform,
+            { x: side * 0.36, y: 1.49, z: 0 },
+            character
+        );
+    }
+
+    // NECK
+
+    createMesh(
+        new THREE.CylinderGeometry(0.13, 0.15, 0.2, 12),
+        materials.skin,
+        { x: 0, y: 1.68, z: 0 },
+        character
     );
 
-    body.position.y = 1;
-    body.castShadow = true;
-    body.receiveShadow = true;
+    // COLLAR
 
-    player.add(body);
+    const collar = createMesh(
+        new THREE.BoxGeometry(0.32, 0.13, 0.45),
+        materials.uniformDark,
+        { x: 0, y: 1.57, z: 0.02 },
+        character
+    );
 
+    collar.rotation.x = -0.15;
+
+    // UNIFORM BUTTONS
+
+    for (let i = 0; i < 3; i++) {
+        createMesh(
+            new THREE.SphereGeometry(0.035, 8, 8),
+            materials.buttons,
+            { x: 0, y: 1.38 - i * 0.18, z: 0.216 },
+            character
+        );
+    }
+
+    // BELT
+
+    createMesh(
+        new THREE.BoxGeometry(0.76, 0.12, 0.44),
+        materials.uniformDark,
+        { x: 0, y: 0.72, z: 0 },
+        character
+    );
+
+    // ======================================
     // HEAD
+    // ======================================
 
-    const headGeometry = new THREE.SphereGeometry(
-        0.32,
-        20,
-        20
+    const head = new THREE.Group();
+
+    head.name = 'Head';
+
+    head.position.y = 1.99;
+
+    character.add(head);
+
+    createMesh(
+        new THREE.SphereGeometry(0.31, 24, 24),
+        materials.skin,
+        { x: 0, y: 0, z: 0 },
+        head
     );
 
-    const headMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf0d0bc,
-        roughness: 0.7
-    });
+    // EARS
 
-    const head = new THREE.Mesh(
-        headGeometry,
-        headMaterial
+    for (const side of [-1, 1]) {
+        createMesh(
+            new THREE.SphereGeometry(0.075, 12, 12),
+            materials.skin,
+            { x: side * 0.3, y: -0.02, z: 0 },
+            head
+        );
+    }
+
+    // EYES
+
+    for (const side of [-1, 1]) {
+
+        createMesh(
+            new THREE.SphereGeometry(0.045, 12, 12),
+            materials.white,
+            { x: side * 0.12, y: 0.045, z: 0.265 },
+            head
+        );
+
+        createMesh(
+            new THREE.SphereGeometry(0.023, 10, 10),
+            materials.eyes,
+            { x: side * 0.12, y: 0.045, z: 0.303 },
+            head
+        );
+
+        // EYEBROWS
+
+        const eyebrow = createMesh(
+            new THREE.BoxGeometry(0.105, 0.025, 0.035),
+            materials.hair,
+            { x: side * 0.12, y: 0.12, z: 0.27 },
+            head
+        );
+
+        eyebrow.rotation.z = side * -0.12;
+    }
+
+    // NOSE
+
+    createMesh(
+        new THREE.SphereGeometry(0.035, 10, 10),
+        materials.skin,
+        { x: 0, y: -0.035, z: 0.295 },
+        head
     );
 
-    head.position.y = 2;
-    head.castShadow = true;
+    // MOUTH
 
-    player.add(head);
+    const mouth = createMesh(
+        new THREE.BoxGeometry(0.09, 0.012, 0.015),
+        materials.eyes,
+        { x: 0, y: -0.14, z: 0.298 },
+        head
+    );
 
+    // ======================================
+    // ANIME HAIR
+    // ======================================
+
+    // Main hair cap
+
+    createMesh(
+        new THREE.SphereGeometry(
+            0.325,
+            20,
+            16,
+            0,
+            Math.PI * 2,
+            0,
+            Math.PI * 0.55
+        ),
+        materials.hair,
+        { x: 0, y: 0.08, z: -0.015 },
+        head
+    );
+
+    // Top spikes
+
+    createSpike(
+        head,
+        { x: 0, y: 0.39, z: -0.02 },
+        { x: 0, y: 1, z: 0 },
+        0.42
+    );
+
+    createSpike(
+        head,
+        { x: -0.17, y: 0.27, z: 0.02 },
+        { x: -0.5, y: 1, z: 0.1 },
+        0.38
+    );
+
+    createSpike(
+        head,
+        { x: 0.17, y: 0.27, z: 0.02 },
+        { x: 0.5, y: 1, z: 0.1 },
+        0.38
+    );
+
+    createSpike(
+        head,
+        { x: -0.25, y: 0.16, z: 0.05 },
+        { x: -1, y: 0.4, z: 0.2 },
+        0.32
+    );
+
+    createSpike(
+        head,
+        { x: 0.25, y: 0.16, z: 0.05 },
+        { x: 1, y: 0.4, z: 0.2 },
+        0.32
+    );
+
+    // Back hair
+
+    for (let i = 0; i < 3; i++) {
+        createSpike(
+            head,
+            {
+                x: (i - 1) * 0.15,
+                y: 0.12,
+                z: -0.24
+            },
+            {
+                x: (i - 1) * 0.5,
+                y: 0.1,
+                z: -1
+            },
+            0.38
+        );
+    }
+
+    // ======================================
+    // ARMS
+    // ======================================
+
+    const armPivots = [];
+
+    for (const side of [-1, 1]) {
+
+        const arm = new THREE.Group();
+
+        arm.position.set(
+            side * 0.43,
+            1.48,
+            0
+        );
+
+        arm.name = side === -1 ? 'LeftArm' : 'RightArm';
+
+        character.add(arm);
+
+        // Upper arm
+
+        createMesh(
+            new THREE.CapsuleGeometry(0.14, 0.43, 4, 8),
+            materials.uniform,
+            { x: 0, y: -0.32, z: 0 },
+            arm
+        );
+
+        // Hand
+
+        createMesh(
+            new THREE.SphereGeometry(0.115, 12, 12),
+            materials.skin,
+            { x: 0, y: -0.69, z: 0.015 },
+            arm
+        );
+
+        armPivots.push(arm);
+    }
+
+    // ======================================
+    // LEGS
+    // ======================================
+
+    const legPivots = [];
+
+    for (const side of [-1, 1]) {
+
+        const leg = new THREE.Group();
+
+        leg.position.set(
+            side * 0.2,
+            0.72,
+            0
+        );
+
+        leg.name = side === -1 ? 'LeftLeg' : 'RightLeg';
+
+        character.add(leg);
+
+        // Pants
+
+        createMesh(
+            new THREE.CapsuleGeometry(0.17, 0.48, 4, 8),
+            materials.uniform,
+            { x: 0, y: -0.35, z: 0 },
+            leg
+        );
+
+        // Shoes
+
+        createMesh(
+            new THREE.BoxGeometry(0.3, 0.17, 0.43),
+            materials.uniformDark,
+            { x: 0, y: -0.73, z: 0.09 },
+            leg
+        );
+
+        legPivots.push(leg);
+    }
+
+    // ======================================
     // SPAWN POSITION
+    // ======================================
 
     player.position.copy(
         PLAYER_CONFIG.spawnPosition
     );
 
+    // ======================================
     // PLAYER DATA
+    // ======================================
 
     player.userData = {
+
         health: 100,
         maxHealth: 100,
 
@@ -94,7 +448,12 @@ export function createPlayer(scene) {
         isSprinting: false,
 
         isAttacking: false,
-        isBlocking: false
+        isBlocking: false,
+
+        character: character,
+        head: head,
+        arms: armPivots,
+        legs: legPivots
     };
 
     scene.add(player);
@@ -110,15 +469,11 @@ export function updatePlayer(player, keys, delta) {
 
     const direction = new THREE.Vector3();
 
-    // MOVEMENT INPUT
-
     if (keys['KeyW']) direction.z -= 1;
     if (keys['KeyS']) direction.z += 1;
 
     if (keys['KeyA']) direction.x -= 1;
     if (keys['KeyD']) direction.x += 1;
-
-    // MOVEMENT CHECK
 
     const isMoving = direction.lengthSq() > 0;
 
@@ -129,11 +484,7 @@ export function updatePlayer(player, keys, delta) {
         return;
     }
 
-    // NORMALIZE MOVEMENT
-
     direction.normalize();
-
-    // SPRINT
 
     const isSprinting =
         keys['ShiftLeft'] ||
@@ -145,15 +496,11 @@ export function updatePlayer(player, keys, delta) {
         ? PLAYER_CONFIG.sprintSpeed
         : PLAYER_CONFIG.speed;
 
-    // APPLY MOVEMENT
-
     player.position.x +=
         direction.x * speed * delta;
 
     player.position.z +=
         direction.z * speed * delta;
-
-    // PLAYER ROTATION
 
     const targetRotation = Math.atan2(
         direction.x,
