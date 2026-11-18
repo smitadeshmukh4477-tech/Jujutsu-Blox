@@ -1,1 +1,122 @@
 
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: #080b12;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+#game-container {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+}
+
+#game-container canvas {
+    display: block;
+}
+
+#hud {
+    position: fixed;
+    top: 25px;
+    left: 25px;
+    z-index: 10;
+    width: 280px;
+    padding: 20px;
+    background: rgba(10, 13, 25, 0.88);
+    border: 1px solid rgba(130, 90, 255, 0.45);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+}
+
+.player-info h2 {
+    font-size: 20px;
+    letter-spacing: 2px;
+    color: #b59aff;
+    margin-bottom: 8px;
+}
+
+.player-info p {
+    font-size: 12px;
+    color: #aaa;
+    letter-spacing: 2px;
+}
+
+.bars {
+    margin-top: 20px;
+}
+
+.bar {
+    width: 100%;
+    height: 13px;
+    background: #252936;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+#health-fill {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #e52d45, #ff6475);
+    transition: width 0.2s;
+}
+
+#energy-fill {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #5144e8, #a77bff);
+    transition: width 0.2s;
+}
+
+#stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #bbb;
+    margin-top: 12px;
+}
+
+#loading {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: #080b12;
+    transition: opacity 0.6s;
+}
+
+#loading h1 {
+    font-size: clamp(32px, 6vw, 65px);
+    letter-spacing: 5px;
+    color: #b59aff;
+    text-shadow: 0 0 30px #7045ff;
+}
+
+#loading p {
+    margin-top: 15px;
+    color: #888;
+    letter-spacing: 5px;
+    font-size: 11px;
+}
+
+@media (max-width: 600px) {
+    #hud {
+        top: 12px;
+        left: 12px;
+        width: 230px;
+        padding: 14px;
+    }
+}
+
