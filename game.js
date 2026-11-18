@@ -1,10 +1,11 @@
-
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 
+// bump the number after ?v= every time you change player.js
+// (GitHub Pages + browsers cache imports hard, this forces a fresh copy)
 import {
     createPlayer,
     updatePlayer
-} from './player.js';
+} from './player.js?v=2';
 
 // ==========================================
 // 1. SCENE
@@ -46,31 +47,48 @@ renderer.setPixelRatio(
 );
 
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 document.getElementById('game-container')
     .appendChild(renderer.domElement);
 
 // ==========================================
-// 4. LIGHTING
+// 4. LIGHTING (tuned for toon shading)
 // ==========================================
+// ambient is kept low so the 3 shading steps on the character stay visible.
+// before: both lights at 2 = washed out, no contrast.
 
 const ambient = new THREE.HemisphereLight(
-    0xffffff,
+    0xdfe6ff,
     0x30304f,
-    2
+    0.8
 );
 
 scene.add(ambient);
 
 const sunlight = new THREE.DirectionalLight(
     0xffffff,
-    2
+    2.8
 );
 
-sunlight.position.set(15, 25, 10);
+const sunOffset = new THREE.Vector3(15, 25, 10);
+
+sunlight.position.copy(sunOffset);
 sunlight.castShadow = true;
 
+// shadow area follows the player (default area is tiny and stays at origin)
+sunlight.shadow.mapSize.set(2048, 2048);
+sunlight.shadow.camera.left = -14;
+sunlight.shadow.camera.right = 14;
+sunlight.shadow.camera.top = 14;
+sunlight.shadow.camera.bottom = -14;
+sunlight.shadow.camera.near = 1;
+sunlight.shadow.camera.far = 80;
+sunlight.shadow.bias = -0.0005;
+sunlight.shadow.normalBias = 0.03;
+
 scene.add(sunlight);
+scene.add(sunlight.target);
 
 // ==========================================
 // 5. ENVIRONMENT
@@ -156,9 +174,15 @@ function updateCamera(delta) {
 
     camera.lookAt(
         player.position.x,
-        player.position.y + 1,
+        player.position.y + 1.5,
         player.position.z
     );
+}
+
+// keep the sun + its shadow box centered on the player
+function updateSun() {
+    sunlight.target.position.copy(player.position);
+    sunlight.position.copy(player.position).add(sunOffset);
 }
 
 // ==========================================
@@ -189,6 +213,7 @@ function animate() {
     updatePlayer(player, keys, delta);
 
     updateCamera(delta);
+    updateSun();
 
     renderer.render(scene, camera);
 }
