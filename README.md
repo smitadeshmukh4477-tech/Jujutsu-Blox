@@ -1,0 +1,2 @@
+# Jujutsu-Blox
+Browser only
